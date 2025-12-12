@@ -13,8 +13,7 @@ export const predictController = async (req: Request, res: Response) => {
     }
 
     const result = await runPythonModel(features);
-
-    res.json({ predictedPrice: result });
+    res.json({ predictedPrice: result.price });
   } catch (error) {
     console.error("Prediction error:", error);
     res.status(500).json({ error: "Internal server error" });
