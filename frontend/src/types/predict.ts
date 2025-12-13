@@ -1,11 +1,15 @@
+import type { MotionValue } from "framer-motion";
+
 export interface PredictRequest {
-    size: number;
-    location: number;
-    rooms: number;
-    age: number;
-    parking: number;
-  }
-  
+  size: number;
+  cityCode: number; 
+  rooms: number;
+  year: number;
+  parking?: number;
+  balconies?: number;
+}
+
 export interface PredictResponse {
-    price: number;
+  predictedPrice(animatedPrice: MotionValue<number>, predictedPrice: any, arg2: { duration: number; onUpdate: (val: any) => void; }): unknown;
+  price: number;
 }

@@ -1,37 +1,44 @@
+import pandas as pd
 from sklearn.linear_model import LinearRegression
-import numpy as np
 import json
 import sys
 
-def train_model():
-    # False info 
-    # TODO: change for recieving from api or somthing, if there is one -_-
-    X = np.array([
-        [70, 1, 3, 10, 1],
-        [85, 2, 4, 5, 1],
-        [60, 1, 2, 15, 0],
-        [90, 2, 4, 2, 1],
-        [50, 1, 2, 20, 0],
-        [95, 2, 5, 1, 1],
-        [80, 2, 3, 8, 1],
-        [65, 1, 3, 12, 0]
-    ])
-    # Prices in realistic scale
-    y = np.array([1200000, 1500000, 900000, 1800000, 850000, 2000000, 1600000, 1100000])
-    model = LinearRegression()
-    model.fit(X, y)
-    return model
+df = pd.read_csv("./python/real_estate.csv")
 
-# TRAIN model once
-model = train_model()
+data_rows = []
+for _, row in df.iterrows():
+    if pd.notna(row['average price (NIS) 3 rooms apartments']):
+        data_rows.append([
+            row['Lamas_code'],      # cityCode
+            3,                       # rooms
+            row['year'],             # year as age proxy
+            0,                       # parking (if unknown, default 0)
+            0,                       # balconies (if unknown, default 0)
+            row['average price (NIS) 3 rooms apartments']
+        ])
+    if pd.notna(row['average price (NIS) 4+ rooms apartments']):
+        data_rows.append([
+            row['Lamas_code'],
+            4,
+            row['year'],
+            0,
+            0,
+            row['average price (NIS) 4+ rooms apartments']
+        ])
+
+X = [[r[0], r[1], r[2], r[3], r[4]] for r in data_rows]
+y = [r[5] for r in data_rows]
+
+model = LinearRegression()
+model.fit(X, y)
 
 def predict(features: dict):
     feature_list = [
-        features['size'],
-        features['location'],
+        features['cityCode'],
         features['rooms'],
-        features['age'],
-        features['parking']
+        features.get('year', 2025),
+        features.get('parking', 0),
+        features.get('balconies', 0),
     ]
     price = model.predict([feature_list])[0]
     return price

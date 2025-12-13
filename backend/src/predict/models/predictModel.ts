@@ -1,9 +1,10 @@
 export interface PredictFeatures {
   size: number;
-  location: number;
+  cityCode: number;
   rooms: number;
-  age: number;
+  year: number;
   parking: number;
+  balconies: number;
 }
 
 export interface PythonResult {

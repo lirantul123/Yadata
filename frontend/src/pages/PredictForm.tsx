@@ -14,38 +14,41 @@ import { motion, useMotionValue, animate } from "framer-motion";
 import HouseIcon from "@mui/icons-material/House";
 import ApartmentIcon from "@mui/icons-material/Apartment";
 import QuestionMark from "@mui/icons-material/QuestionMark";
+import { CITY_MAP } from "./../../utils/cities"
 
 function PredictForm() {
   const [form, setForm] = useState({
     size: "",
-    location: "",
+    cityCode: "",
     rooms: "",
-    age: "",
+    balconies: "",
     parking: "",
   });
-  
+
   const [price, setPrice] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const animatedPrice = useMotionValue(0);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.type === "number" ? Number(e.target.value) : e.target.value;
+    const value = e.target.value;
     setForm({ ...form, [e.target.name]: value });
   };
-  
+
   const handleSubmit = async () => {
     setLoading(true);
     setPrice(null);
     animatedPrice.set(0);
-
+  
     try {
       const result = await predictPrice({
-        size: Number(form.size),
-        location: Number(form.location),
+        cityCode: Number(form.cityCode),
         rooms: Number(form.rooms),
-        age: Number(form.age),
+        balconies: Number(form.balconies),
+        size: Number(form.size),
         parking: Number(form.parking),
+        year: new Date().getFullYear(),
       });
+  
       animate(animatedPrice, result.price, {
         duration: 1.5,
         onUpdate: (val) => setPrice(Math.round(val)),
@@ -56,16 +59,7 @@ function PredictForm() {
       setLoading(false);
     }
   };
-
-  // Icon animations
-  const iconVariants = {
-    float: {
-      y: [0, -20, 0],
-      rotate: [0, 10, -10, 0],
-      transition: { duration: 3, repeat: Infinity, ease: "easeInOut" },
-    },
-  };
-
+  
   return (
     <Box
       sx={{
@@ -79,7 +73,7 @@ function PredictForm() {
         py: 8,
       }}
     >
-      {/* Fun background shapes */}
+      {/* Background shapes */}
       <Box
         sx={{
           position: "absolute",
@@ -105,59 +99,29 @@ function PredictForm() {
         >
           {/* Header */}
           <Box textAlign="center" mb={4} position="relative">
-            {/* House Icon */}
             <motion.div
-              animate={{
-                y: [0, -20, 0],
-                rotate: [0, 10, -10, 0],
-              }}
-              transition={{
-                duration: 3,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
+              animate={{ y: [0, -20, 0], rotate: [0, 10, -10, 0] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
               style={{ position: "absolute", left: -40, top: -20 }}
             >
               <HouseIcon sx={{ fontSize: 60, color: "#ff8a65" }} />
             </motion.div>
-
-            {/* Apartment Icon */}
             <motion.div
-              animate={{
-                y: [0, -25, 0],
-                rotate: [0, -10, 10, 0],
-              }}
-              transition={{
-                duration: 4,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
+              animate={{ y: [0, -25, 0], rotate: [0, -10, 10, 0] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
               style={{ position: "absolute", right: -40, top: -20 }}
             >
               <ApartmentIcon sx={{ fontSize: 60, color: "#4db6ac" }} />
             </motion.div>
-
-            {/* Question Mark Icon */}
             <motion.div
-              animate={{
-                y: [0, -30, 0],
-                rotate: [0, 15, -15, 0],
-              }}
-              transition={{
-                duration: 5,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
+              animate={{ y: [0, -30, 0], rotate: [0, 15, -15, 0] }}
+              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
               style={{ position: "absolute", left: "40%", top: -40 }}
             >
               <QuestionMark sx={{ fontSize: 60, color: "#ffb74d" }} />
             </motion.div>
 
-            <Typography
-              variant="h4"
-              gutterBottom
-              sx={{ fontWeight: 700, color: "#00796b" }}
-            >
+            <Typography variant="h4" gutterBottom sx={{ fontWeight: 700, color: "#00796b" }}>
               Predict House / Apartment Price
             </Typography>
             <Typography variant="body1" sx={{ fontStyle: "italic", color: "#555" }}>
@@ -174,17 +138,22 @@ function PredictForm() {
               value={form.size}
               onChange={handleChange}
               fullWidth
+              required
             />
             <TextField
-              label="Location"
-              name="location"
+              label="City"
+              name="cityCode"
               select
-              value={form.location}
+              value={form.cityCode}
               onChange={handleChange}
               fullWidth
+              required
             >
-              <MenuItem value={1}>Suburbs</MenuItem>
-              <MenuItem value={2}>City Center</MenuItem>
+              {Object.entries(CITY_MAP).map(([name, code]) => (
+                <MenuItem key={code} value={code}>
+                  {name}
+                </MenuItem>
+              ))}
             </TextField>
             <TextField
               label="Rooms"
@@ -193,25 +162,35 @@ function PredictForm() {
               value={form.rooms}
               onChange={handleChange}
               fullWidth
+              required
             />
             <TextField
-              label="Age (years)"
-              name="age"
-              type="number"
-              value={form.age}
+              label="Balconies"
+              name="balconies"
+              select
+              value={form.balconies}
               onChange={handleChange}
               fullWidth
-            />
+            >
+              {[0, 1, 2, 3, 4, 5].map((n) => (
+                <MenuItem key={n} value={n}>
+                  {n}
+                </MenuItem>
+              ))}
+            </TextField>
             <TextField
-              label="Parking"
+              label="Parking Spots"
               name="parking"
               select
               value={form.parking}
               onChange={handleChange}
               fullWidth
             >
-              <MenuItem value={1}>Yes</MenuItem>
-              <MenuItem value={0}>No</MenuItem>
+              {[0, 1, 2].map((n) => (
+                <MenuItem key={n} value={n}>
+                  {n}
+                </MenuItem>
+              ))}
             </TextField>
           </Box>
 
@@ -221,23 +200,44 @@ function PredictForm() {
               variant="contained"
               size="large"
               onClick={handleSubmit}
-              disabled={loading}
+              disabled={
+                loading ||
+                !form.size ||
+                !form.cityCode ||
+                !form.rooms
+              }
               sx={{
-                px: 6,
-                py: 1.5,
-                fontWeight: 600,
-                fontSize: 16,
+                px: 8,
+                py: 2,
+                fontWeight: 700,
+                fontSize: 18,
                 color: "#fff",
-                background: "linear-gradient(90deg, #26a69a 0%, #00796b 100%)",
+                borderRadius: 3,
+                background: "linear-gradient(135deg, #26a69a 0%, #00796b 100%)",
+                boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
                 "&:hover": {
-                  background: "linear-gradient(90deg, #009688 0%, #004d40 100%)",
-                  transform: "scale(1.05)",
+                  background: "linear-gradient(135deg, #009688 0%, #004d40 100%)",
+                  transform: "scale(1.07)",
                 },
                 transition: "all 0.3s ease",
               }}
             >
               {loading ? <CircularProgress size={24} color="inherit" /> : "Predict Price"}
             </Button>
+
+            <Typography
+              variant="body2"
+              sx={{
+                mt: 1,
+                fontStyle: "italic",
+                color: !form.size || !form.cityCode || !form.rooms ? "#e57373" : "#4caf50",
+                fontWeight: 500,
+              }}
+            >
+              {!form.size || !form.cityCode || !form.rooms
+                ? "Please fill all required fields."
+                : "Ready!"}
+            </Typography>
           </Box>
 
           {/* Price Output */}
