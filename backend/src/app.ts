@@ -8,7 +8,7 @@ import { checkML } from "./services/mlService";
 const app = express();
 
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: process.env.ALLOWED_ORIGIN ?? "https://yadata.vercel.app" }));
 app.use(express.json());
 
 const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
