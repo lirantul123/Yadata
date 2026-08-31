@@ -1,11 +1,16 @@
-import PredictForm from './pages/PredictForm';
+import { Routes, Route } from "react-router-dom";
+import { Toaster } from "react-hot-toast";
+import PredictForm from "./pages/PredictForm";
+import HistoryPage from "./pages/HistoryPage";
 
-function App() {
+export default function App() {
   return (
-    <div>
-      <PredictForm />
-    </div>
+    <>
+      <Toaster position="top-center" />
+      <Routes>
+        <Route path="/" element={<PredictForm />} />
+        <Route path="/history" element={<HistoryPage />} />
+      </Routes>
+    </>
   );
 }
-
-export default App;
