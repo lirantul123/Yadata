@@ -1,92 +1,74 @@
 import { useState } from "react";
 import {
-  Box, Button, Container, TextField, Typography,
-  MenuItem, Paper, CircularProgress, Link,
+  Box, Button, Container, TextField, Typography, Paper,
+  CircularProgress, Autocomplete, ToggleButton, ToggleButtonGroup,
+  Slider, Chip, Divider, Tooltip,
 } from "@mui/material";
+import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
+import BalconyIcon from "@mui/icons-material/Balcony";
+import SquareFootIcon from "@mui/icons-material/SquareFoot";
+import LocationCityIcon from "@mui/icons-material/LocationCity";
+import BedroomParentIcon from "@mui/icons-material/BedroomParent";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import { motion, useMotionValue, animate } from "framer-motion";
-import HouseIcon from "@mui/icons-material/House";
-import ApartmentIcon from "@mui/icons-material/Apartment";
 import toast from "react-hot-toast";
 import { predictPrice } from "../api/predictApi";
 import { addHistoryEntry } from "../utils/history";
 import { CITY_MAP } from "../../utils/cities";
 
+const CITIES = Object.entries(CITY_MAP)
+  .map(([name, code]) => ({ name, code }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
 const CITY_NAME_BY_CODE: Record<number, string> = Object.fromEntries(
-  Object.entries(CITY_MAP).map(([name, code]) => [code, name])
+  CITIES.map(({ name, code }) => [code, name])
 );
 
-interface FormState {
-  size: string;
-  cityCode: string;
-  rooms: string;
-  balconies: string;
-  parking: string;
-}
+const ROOM_OPTIONS = ["1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5", "6+"];
 
-interface FieldErrors {
-  size?: string;
-  cityCode?: string;
-  rooms?: string;
-}
-
-function validateForm(form: FormState): FieldErrors {
-  const errors: FieldErrors = {};
-  const size = Number(form.size);
-  const rooms = Number(form.rooms);
-
-  if (!form.size) errors.size = "Required";
-  else if (size < 20 || size > 500) errors.size = "Must be 20–500 m²";
-
-  if (!form.cityCode) errors.cityCode = "Required";
-
-  if (!form.rooms) errors.rooms = "Required";
-  else if (rooms < 1 || rooms > 15) errors.rooms = "Must be 1–15";
-
-  return errors;
-}
+const fmt = (n: number) =>
+  n >= 1_000_000
+    ? `₪${(n / 1_000_000).toFixed(2)}M`
+    : `₪${Math.round(n).toLocaleString()}`;
 
 export default function PredictForm() {
-  const [form, setForm] = useState<FormState>({
-    size: "", cityCode: "", rooms: "", balconies: "0", parking: "0",
-  });
-  const [errors, setErrors] = useState<FieldErrors>({});
+  const [city, setCity] = useState<{ name: string; code: number } | null>(null);
+  const [rooms, setRooms] = useState<string>("");
+  const [size, setSize] = useState<number>(80);
+  const [balconies, setBalconies] = useState<number>(0);
+  const [parking, setParking] = useState<number>(0);
+
   const [price, setPrice] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const animatedPrice = useMotionValue(0);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const next = { ...form, [e.target.name]: e.target.value };
-    setForm(next);
-    const newErrors = validateForm(next);
-    setErrors((prev) => ({ ...prev, [e.target.name]: newErrors[e.target.name as keyof FieldErrors] }));
-  };
+  const isReady = !!city && !!rooms;
 
   const handleSubmit = async () => {
-    const fieldErrors = validateForm(form);
-    setErrors(fieldErrors);
-    if (Object.keys(fieldErrors).length > 0) return;
-
+    if (!isReady) return;
     setLoading(true);
     setPrice(null);
     animatedPrice.set(0);
 
+    const roomNum = rooms === "6+" ? 6 : Number(rooms);
+
     try {
       const result = await predictPrice({
-        cityCode:  Number(form.cityCode),
-        rooms:     Number(form.rooms),
-        size:      Number(form.size),
-        parking:   Number(form.parking),
-        balconies: Number(form.balconies),
+        cityCode: city!.code,
+        rooms: roomNum,
+        size,
+        parking,
+        balconies,
       });
 
       addHistoryEntry({
-        size:      Number(form.size),
-        cityCode:  Number(form.cityCode),
-        cityName:  CITY_NAME_BY_CODE[Number(form.cityCode)] ?? "Unknown",
-        rooms:     Number(form.rooms),
-        balconies: Number(form.balconies),
-        parking:   Number(form.parking),
-        price:     result.price,
+        size,
+        cityCode: city!.code,
+        cityName: CITY_NAME_BY_CODE[city!.code] ?? city!.name,
+        rooms: roomNum,
+        balconies,
+        parking,
+        price: result.price,
       });
 
       animate(animatedPrice, result.price, {
@@ -100,165 +82,269 @@ export default function PredictForm() {
     }
   };
 
-  const isDisabled = loading || !!Object.keys(validateForm(form)).length;
+  const low = price ? Math.round(price * 0.88) : null;
+  const high = price ? Math.round(price * 1.12) : null;
 
   return (
     <Box
       sx={{
         minHeight: "100vh",
+        pt: "64px",
+        background: "linear-gradient(160deg,#e8f5f3 0%,#f5f9ff 50%,#fff8f5 100%)",
         display: "flex",
-        alignItems: "center",
+        alignItems: { xs: "flex-start", md: "center" },
         justifyContent: "center",
-        background: "linear-gradient(135deg, #d0e8f2, #f0f7f4)",
-        py: 8,
-        position: "relative",
-        overflow: "hidden",
+        py: { xs: 3, md: 6 },
       }}
     >
-      <Container maxWidth="sm" sx={{ position: "relative", zIndex: 1 }}>
-        <Paper sx={{ p: 6, borderRadius: 6, background: "rgba(255,255,255,0.97)", boxShadow: "0 25px 50px rgba(0,0,0,0.1)" }}>
-          {/* Header */}
-          <Box textAlign="center" mb={4} position="relative">
-            <motion.div
-              animate={{ y: [0, -20, 0], rotate: [0, 10, -10, 0] }}
-              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-              style={{ position: "absolute", left: -40, top: -20 }}
-            >
-              <HouseIcon sx={{ fontSize: 60, color: "#ff8a65" }} />
-            </motion.div>
-            <motion.div
-              animate={{ y: [0, -25, 0], rotate: [0, -10, 10, 0] }}
-              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-              style={{ position: "absolute", right: -40, top: -20 }}
-            >
-              <ApartmentIcon sx={{ fontSize: 60, color: "#4db6ac" }} />
-            </motion.div>
-            <Typography variant="h4" gutterBottom sx={{ fontWeight: 700, color: "#00796b" }}>
-              Predict House / Apartment Price
-            </Typography>
-            <Typography variant="body2" sx={{ color: "#555", fontStyle: "italic" }}>
-              Enter property details for an instant estimate
-            </Typography>
-            <Link href="/history" underline="hover" sx={{ display: "block", mt: 1, color: "#00796b", fontSize: 14 }}>
-              View prediction history →
-            </Link>
+      <Container maxWidth="sm">
+        {/* Hero text */}
+        <Box textAlign="center" mb={3}>
+          <Typography variant="h4" fontWeight={800} sx={{ color: "#004d40", lineHeight: 1.2 }}>
+            How much is your property worth?
+          </Typography>
+          <Typography variant="body1" sx={{ color: "#546e7a", mt: 1 }}>
+            Instant estimate based on Israeli market data
+          </Typography>
+        </Box>
+
+        <Paper
+          elevation={0}
+          sx={{
+            p: { xs: 3, sm: 5 },
+            borderRadius: 5,
+            border: "1px solid rgba(0,0,0,0.06)",
+            boxShadow: "0 20px 60px rgba(0,121,107,0.08)",
+          }}
+        >
+          {/* City */}
+          <Box mb={3}>
+            <Box display="flex" alignItems="center" gap={1} mb={1}>
+              <LocationCityIcon sx={{ fontSize: 18, color: "#00796b" }} />
+              <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
+                CITY
+              </Typography>
+            </Box>
+            <Autocomplete
+              options={CITIES}
+              getOptionLabel={(o) => o.name}
+              value={city}
+              onChange={(_, v) => setCity(v)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder="Search city..."
+                  size="medium"
+                  sx={{ "& .MuiOutlinedInput-root": { borderRadius: 3 } }}
+                />
+              )}
+              isOptionEqualToValue={(a, b) => a.code === b.code}
+            />
           </Box>
 
-          {/* Form */}
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <TextField
-              label="Size (m²)"
-              name="size"
-              type="number"
-              value={form.size}
-              onChange={handleChange}
-              fullWidth
-              required
-              error={!!errors.size}
-              helperText={errors.size}
-              inputProps={{ min: 20, max: 500 }}
+          <Divider sx={{ my: 3 }} />
+
+          {/* Rooms */}
+          <Box mb={3}>
+            <Box display="flex" alignItems="center" gap={1} mb={1.5}>
+              <BedroomParentIcon sx={{ fontSize: 18, color: "#00796b" }} />
+              <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
+                ROOMS
+              </Typography>
+            </Box>
+            <ToggleButtonGroup
+              value={rooms}
+              exclusive
+              onChange={(_, v) => v && setRooms(v)}
+              sx={{ flexWrap: "wrap", gap: 0.5 }}
+            >
+              {ROOM_OPTIONS.map((r) => (
+                <ToggleButton
+                  key={r}
+                  value={r}
+                  sx={{
+                    borderRadius: "10px !important",
+                    border: "1px solid rgba(0,0,0,0.12) !important",
+                    fontWeight: 600,
+                    minWidth: 52,
+                    "&.Mui-selected": {
+                      background: "#00796b",
+                      color: "#fff",
+                      "&:hover": { background: "#005a4f" },
+                    },
+                  }}
+                >
+                  {r}
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          </Box>
+
+          <Divider sx={{ my: 3 }} />
+
+          {/* Size */}
+          <Box mb={3}>
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <SquareFootIcon sx={{ fontSize: 18, color: "#00796b" }} />
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
+                  SIZE
+                </Typography>
+              </Box>
+              <Chip
+                label={`${size} m²`}
+                size="small"
+                sx={{ fontWeight: 700, background: "#e8f5f3", color: "#00796b" }}
+              />
+            </Box>
+            <Slider
+              value={size}
+              min={20}
+              max={400}
+              step={5}
+              onChange={(_, v) => setSize(v as number)}
+              sx={{
+                color: "#00796b",
+                "& .MuiSlider-thumb": { width: 20, height: 20 },
+                "& .MuiSlider-track": { height: 6 },
+                "& .MuiSlider-rail": { height: 6 },
+              }}
             />
-            <TextField
-              label="City"
-              name="cityCode"
-              select
-              value={form.cityCode}
-              onChange={handleChange}
-              fullWidth
-              required
-              error={!!errors.cityCode}
-              helperText={errors.cityCode}
-            >
-              {Object.entries(CITY_MAP).map(([name, code]) => (
-                <MenuItem key={code} value={code}>{name}</MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Rooms"
-              name="rooms"
-              type="number"
-              value={form.rooms}
-              onChange={handleChange}
-              fullWidth
-              required
-              error={!!errors.rooms}
-              helperText={errors.rooms}
-              inputProps={{ min: 1, max: 15, step: 0.5 }}
-            />
-            <TextField
-              label="Balconies"
-              name="balconies"
-              select
-              value={form.balconies}
-              onChange={handleChange}
-              fullWidth
-            >
-              {[0, 1, 2, 3, 4, 5].map((n) => (
-                <MenuItem key={n} value={n}>{n}</MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Parking Spots"
-              name="parking"
-              select
-              value={form.parking}
-              onChange={handleChange}
-              fullWidth
-            >
-              {[0, 1, 2].map((n) => (
-                <MenuItem key={n} value={n}>{n}</MenuItem>
-              ))}
-            </TextField>
+            <Box display="flex" justifyContent="space-between">
+              <Typography variant="caption" color="text.secondary">20 m²</Typography>
+              <Typography variant="caption" color="text.secondary">400 m²</Typography>
+            </Box>
+          </Box>
+
+          <Divider sx={{ my: 3 }} />
+
+          {/* Parking + Balconies */}
+          <Box display="grid" gridTemplateColumns="1fr 1fr" gap={3} mb={4}>
+            <Box>
+              <Box display="flex" alignItems="center" gap={1} mb={1.5}>
+                <DirectionsCarIcon sx={{ fontSize: 18, color: "#00796b" }} />
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
+                  PARKING
+                </Typography>
+              </Box>
+              <ToggleButtonGroup
+                value={parking}
+                exclusive
+                onChange={(_, v) => v !== null && setParking(v)}
+              >
+                {[0, 1, 2].map((n) => (
+                  <ToggleButton
+                    key={n}
+                    value={n}
+                    sx={{
+                      fontWeight: 600,
+                      "&.Mui-selected": { background: "#00796b", color: "#fff", "&:hover": { background: "#005a4f" } },
+                    }}
+                  >
+                    {n}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            </Box>
+            <Box>
+              <Box display="flex" alignItems="center" gap={1} mb={1.5}>
+                <BalconyIcon sx={{ fontSize: 18, color: "#00796b" }} />
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
+                  BALCONIES
+                </Typography>
+              </Box>
+              <ToggleButtonGroup
+                value={balconies}
+                exclusive
+                onChange={(_, v) => v !== null && setBalconies(v)}
+              >
+                {[0, 1, 2, 3].map((n) => (
+                  <ToggleButton
+                    key={n}
+                    value={n}
+                    sx={{
+                      fontWeight: 600,
+                      "&.Mui-selected": { background: "#00796b", color: "#fff", "&:hover": { background: "#005a4f" } },
+                    }}
+                  >
+                    {n}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            </Box>
           </Box>
 
           {/* Submit */}
-          <Box textAlign="center" mt={4}>
-            <Button
-              variant="contained"
-              size="large"
-              onClick={handleSubmit}
-              disabled={isDisabled}
-              sx={{
-                px: 8, py: 2, fontWeight: 700, fontSize: 18,
-                borderRadius: 3,
-                background: "linear-gradient(135deg, #26a69a 0%, #00796b 100%)",
-                boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
-                "&:hover": {
-                  background: "linear-gradient(135deg, #009688 0%, #004d40 100%)",
-                  transform: "scale(1.05)",
-                },
-                transition: "all 0.3s ease",
-              }}
-            >
-              {loading ? <CircularProgress size={24} color="inherit" /> : "Predict Price"}
-            </Button>
-          </Box>
+          <Button
+            fullWidth
+            variant="contained"
+            size="large"
+            onClick={handleSubmit}
+            disabled={!isReady || loading}
+            sx={{
+              py: 1.8,
+              fontSize: 17,
+              fontWeight: 700,
+              borderRadius: 3,
+              background: isReady ? "linear-gradient(135deg,#26a69a,#00796b)" : undefined,
+              boxShadow: isReady ? "0 8px 24px rgba(0,121,107,0.35)" : "none",
+              "&:hover": { background: "linear-gradient(135deg,#00897b,#004d40)", transform: "translateY(-1px)", boxShadow: "0 12px 28px rgba(0,121,107,0.4)" },
+              transition: "all 0.25s ease",
+            }}
+          >
+            {loading ? <CircularProgress size={24} color="inherit" /> : "Get Price Estimate"}
+          </Button>
 
-          {/* Result */}
-          {price !== null && (
-            <motion.div
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.7 }}
-            >
-              <Box
-                mt={5} p={4} textAlign="center"
-                sx={{
-                  background: "linear-gradient(135deg, #ff8a65, #ffb74d)",
-                  borderRadius: 3,
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-                }}
-              >
-                <Typography variant="h6" sx={{ color: "#fff", letterSpacing: 1 }}>
-                  Estimated Price
-                </Typography>
-                <Typography variant="h3" sx={{ color: "#fff", fontWeight: 700, fontFamily: "monospace", letterSpacing: 1.5 }}>
-                  ₪ {price.toLocaleString()}
-                </Typography>
-              </Box>
-            </motion.div>
+          {!isReady && (
+            <Typography variant="caption" display="block" textAlign="center" sx={{ mt: 1, color: "text.disabled" }}>
+              Select a city and number of rooms to continue
+            </Typography>
           )}
         </Paper>
+
+        {/* Result */}
+        {price !== null && low !== null && high !== null && (
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <Paper
+              elevation={0}
+              sx={{
+                mt: 3,
+                p: { xs: 3, sm: 4 },
+                borderRadius: 5,
+                background: "linear-gradient(135deg,#00796b,#004d40)",
+                boxShadow: "0 20px 50px rgba(0,121,107,0.3)",
+                textAlign: "center",
+              }}
+            >
+              <Typography variant="overline" sx={{ color: "rgba(255,255,255,0.7)", letterSpacing: 2 }}>
+                Estimated Market Value
+              </Typography>
+              <Typography
+                variant="h2"
+                sx={{ color: "#fff", fontWeight: 800, my: 1, fontFeatureSettings: '"tnum"' }}
+              >
+                {fmt(price)}
+              </Typography>
+              <Box display="flex" justifyContent="center" alignItems="center" gap={1} mb={2}>
+                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.75)" }}>
+                  Range: {fmt(low)} – {fmt(high)}
+                </Typography>
+                <Tooltip title="Estimated ±12% confidence interval based on market variation">
+                  <InfoOutlinedIcon sx={{ fontSize: 14, color: "rgba(255,255,255,0.5)", cursor: "help" }} />
+                </Tooltip>
+              </Box>
+              <Box display="flex" justifyContent="center" gap={1} flexWrap="wrap">
+                {city && <Chip label={city.name} size="small" sx={{ background: "rgba(255,255,255,0.15)", color: "#fff" }} />}
+                <Chip label={`${rooms} rooms`} size="small" sx={{ background: "rgba(255,255,255,0.15)", color: "#fff" }} />
+                <Chip label={`${size} m²`} size="small" sx={{ background: "rgba(255,255,255,0.15)", color: "#fff" }} />
+              </Box>
+            </Paper>
+          </motion.div>
+        )}
       </Container>
     </Box>
   );
