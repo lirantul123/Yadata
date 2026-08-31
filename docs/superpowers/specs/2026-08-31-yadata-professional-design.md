@@ -238,7 +238,66 @@ User submits form
 
 ---
 
-## 9. Out of Scope
+## 9. Deployment
+
+### 9.1 Hosting split
+
+Vercel's serverless model cannot run Express or FastAPI as persistent processes. Split:
+
+| Service | Host | URL |
+|---------|------|-----|
+| Frontend (Vite/React) | Vercel | yadata.vercel.app |
+| Backend (Express) | Railway | yadata-api.up.railway.app (or custom) |
+| ML service (FastAPI) | Railway | yadata-ml.up.railway.app (or custom) |
+
+### 9.2 Auto-deploy CI/CD
+
+**Frontend → Vercel:**
+- GitHub integration already exists (yadata.vercel.app)
+- Add `vercel.json` at `frontend/` to configure build/output
+- Set `VITE_API_URL` in Vercel project environment variables (pointing to Railway backend)
+- Every push to `main` → Vercel auto-deploys
+
+**Backend → Railway:**
+- `railway.json` at `backend/` with start command
+- `Procfile`: `web: npm run start`
+- Set env vars in Railway dashboard: `ML_SERVICE_URL`, `PORT`
+- Every push to `main` → Railway auto-deploys
+
+**ML → Railway:**
+- `railway.json` at `ml/` with start command
+- `Procfile`: `web: uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Every push to `main` → Railway auto-deploys
+
+### 9.3 Config files
+
+```
+frontend/vercel.json          # Vite build config for Vercel
+backend/railway.json          # Railway config for Express
+backend/Procfile              # Start command
+ml/railway.json               # Railway config for FastAPI
+ml/Procfile                   # Start command
+.env.example                  # Root-level env var reference
+```
+
+### 9.4 Environment variable flow (production)
+
+```
+Vercel env:
+  VITE_API_URL=https://yadata-api.up.railway.app
+
+Railway (backend) env:
+  ML_SERVICE_URL=https://yadata-ml.up.railway.app
+  PORT=3000
+  NODE_ENV=production
+
+Railway (ML) env:
+  PORT=8000
+```
+
+---
+
+## 10. Out of Scope
 
 - Authentication / user accounts
 - Database (Supabase or otherwise)
