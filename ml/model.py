@@ -3,38 +3,41 @@ import numpy as np
 import pandas as pd
 
 CITY_MULTIPLIER = {
-    2600: 1.00,  # Tel Aviv
-    70:   0.95,  # Jerusalem
-    6500: 0.92,  # Herzliya
-    6400: 0.90,  # Ramat Gan
-    7600: 0.88,  # Ra'anana
-    3000: 0.85,  # Modiin
-    9700: 0.80,  # Bnei Brak
-    7100: 0.80,  # Haifa
-    9000: 0.78,  # Rishon LeZion
-    2610: 0.78,  # Petah Tikva
-    2660: 0.78,  # Rehovot
-    6600: 0.75,  # Kfar Saba
-    6300: 0.75,  # Holon
-    3797: 0.72,  # Kiryat Motzkin
-    9100: 0.72,  # Kiryat Ata
-    6200: 0.70,  # Netanya
-    6800: 0.70,  # Kfar Yona
-    8500: 0.68,  # Yavne
-    4000: 0.65,  # Hadera
-    7300: 0.62,  # Ashkelon
-    3780: 0.60,  # Ashdod
-    7900: 0.60,  # Nahariya
-    7000: 0.58,  # Acre
-    7200: 0.56,  # Kiryat Ata (alternate code)
-    7700: 0.55,  # Eilat
-    6100: 0.52,  # Beersheba
-    8300: 0.50,  # Nazareth
-    8600: 0.48,  # Migdal HaEmek
-    7400: 0.46,  # Kiryat Gat
-    8700: 0.43,  # Kiryat Shmona
-    8400: 0.40,  # Sderot
-    5000: 0.70,  # Other
+    5000: 1.00,  # Tel Aviv
+    6400: 0.92,  # Herzliya
+    8700: 0.90,  # Ra'anana
+    6300: 0.88,  # Givatayim
+    8600: 0.85,  # Ramat Gan
+    7200: 0.82,  # Nes Ziona
+    3000: 0.80,  # Jerusalem
+    6900: 0.80,  # Kfar Saba
+    8400: 0.80,  # Rehovot
+    8300: 0.78,  # Rishon LeZion
+    6100: 0.78,  # Bnei Brak
+    7900: 0.77,  # Petah Tikva
+    6600: 0.76,  # Holon
+    4000: 0.75,  # Haifa
+    9700: 0.75,  # Hod HaSharon
+    6200: 0.72,  # Bat Yam
+    7400: 0.72,  # Netanya
+    2640: 0.68,  # Rosh HaAyin
+    2660: 0.65,  # Yavne
+    6500: 0.65,  # Hadera
+    2600: 0.62,  # Eilat
+    7100: 0.62,  # Ashkelon
+    6800: 0.60,  # Kiryat Ata
+    70:   0.60,  # Ashdod
+    9100: 0.58,  # Nahariya
+    7600: 0.55,  # Akko
+    2610: 0.55,  # Beit Shemesh
+    7700: 0.52,  # Afula
+    7300: 0.50,  # Nazareth
+    9000: 0.50,  # Beersheba
+    8500: 0.48,  # Ramla
+    7000: 0.48,  # Lod
+    2630: 0.42,  # Kiryat Gat
+    3780: 0.45,  # Beitar Illit
+    3797: 0.45,  # Modiin Illit
 }
 
 _CSV_PATH = os.path.join(os.path.dirname(__file__), "real_estate.csv")
