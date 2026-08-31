@@ -65,7 +65,7 @@ export default function HistoryPage() {
                         <TableCell align="right">{e.parking}</TableCell>
                         <TableCell align="right">{e.balconies}</TableCell>
                         <TableCell align="right" sx={{ fontWeight: 600, color: "#00796b" }}>
-                          {Math.round(e.price).toLocaleString()}
+                          ₪ {Math.round(e.price).toLocaleString()}
                         </TableCell>
                         <TableCell align="right" sx={{ color: "text.secondary", fontSize: 12 }}>
                           {new Date(e.createdAt).toLocaleDateString("en-IL")}
