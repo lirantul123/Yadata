@@ -46,7 +46,6 @@ function PredictForm() {
         balconies: Number(form.balconies),
         size: Number(form.size),
         parking: Number(form.parking),
-        year: new Date().getFullYear(),
       });
   
       animate(animatedPrice, result.price, {
