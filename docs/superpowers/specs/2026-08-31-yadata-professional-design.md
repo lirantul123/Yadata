@@ -1,18 +1,17 @@
 # Yadata — Professional Upgrade Design
 
 **Date:** 2026-08-31  
-**Goal:** Production-ready Israeli real estate price prediction app with auth, history, and fast ML
+**Goal:** Production-ready Israeli real estate price prediction app with fast ML and localStorage prediction history. No auth, no database.
 
 ---
 
 ## 1. Overview
 
 Yadata predicts apartment/house prices in Israel. The upgrade introduces:
-- A persistent FastAPI ML microservice (replaces per-request Python spawn)
-- JWT-based authentication (register/login)
-- Prediction history stored in Supabase (PostgreSQL via Prisma)
-- Frontend pages for auth and history
+- A persistent FastAPI ML microservice (replaces per-request Python spawn — cuts latency from ~2-3s to ~50ms)
+- localStorage-based prediction history (no DB, no auth)
 - Bug fixes that currently break the core prediction flow
+- Production hardening (rate limiting, security headers, env vars, proper error handling)
 
 ---
 
@@ -21,24 +20,20 @@ Yadata predicts apartment/house prices in Israel. The upgrade introduces:
 ```
 ┌─────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
 │  React Frontend  │────▶│  Express Backend      │────▶│  FastAPI ML      │
-│  (Vite, MUI)    │     │  (TypeScript, Prisma) │     │  (Python 3.11)   │
+│  (Vite, MUI)    │     │  (TypeScript)         │     │  (Python 3.11)   │
 │  :5173          │     │  :3000                │     │  :8000           │
 └─────────────────┘     └──────────────────────┘     └──────────────────┘
-                                    │
-                                    ▼
-                         ┌──────────────────┐
-                         │  Supabase        │
-                         │  (PostgreSQL)    │
-                         └──────────────────┘
+        │
+        ▼
+  localStorage
+  (prediction history)
 ```
 
-All three services run independently; the backend is the single entry point for the frontend.
+No database. History lives in the browser.
 
 ---
 
-## 3. Bug Fixes (Critical)
-
-These bugs make the current app non-functional:
+## 3. Bug Fixes (Critical — app is currently broken)
 
 | Bug | Location | Fix |
 |-----|----------|-----|
@@ -52,159 +47,167 @@ These bugs make the current app non-functional:
 
 ## 4. FastAPI ML Service
 
-**Location:** `ml/` (new directory)
+**Location:** `ml/` (new directory at project root)
 
-**Startup behavior:** Trains LinearRegression on `real_estate.csv` once at startup (uses ML_Practice logic: log-transform on price, city multipliers, size in feature vector). Model stays in memory for the process lifetime.
+**Startup:** Trains LinearRegression on `backend/python/real_estate.csv` once at startup. Model stays in memory.
 
 **Endpoints:**
-- `POST /predict` — accepts `{ cityCode, rooms, size, parking, balconies, year }`, returns `{ price: float }`
-- `GET /health` — returns `{ status: "ok" }`
+- `POST /predict` — `{ cityCode, rooms, size, parking, balconies, year }` → `{ price: float }`
+- `GET /health` → `{ status: "ok" }`
 
-**ML logic (from ML_Practice/main.py):**
+**ML logic (ported from ML_Practice/main.py):**
 - Features: `[cityCode, year, rooms, size, parking, balconies]`
-- Target: `log(price)` — reverse with `exp()` on prediction
-- Post-prediction multipliers: city factor (per CITY_MAP), luxury factor for size > 160m², extra factor for parking/balconies
+- Target: `log(price)` — exponentiated on prediction
+- Post-prediction multipliers:
+  - City factor: per CITY_MAP dict (Tel Aviv=1.0, Herzliya=0.95, etc.)
+  - Luxury factor: `1.0 + max(0, (size - 160) * 0.015)` for large apartments
+  - Extra factor: `1 + parking * 0.07 + balconies * 0.05`
 
 **Files:**
 ```
 ml/
-  main.py          # FastAPI app
-  model.py         # Training + prediction logic
-  requirements.txt # fastapi, uvicorn, scikit-learn, pandas
+  main.py           # FastAPI app
+  model.py          # Training + predict logic
+  requirements.txt  # fastapi, uvicorn, scikit-learn, pandas, numpy
 ```
 
 ---
 
-## 5. Backend
+## 5. Backend (Express/TypeScript)
 
-**New dependencies:** `prisma`, `@prisma/client`, `bcrypt`, `jsonwebtoken`, `helmet`, `express-rate-limit`, `zod`
+No auth, no Prisma, no DB changes. Focused changes only.
 
-### 5.1 Auth Routes (`/api/auth`)
+**New dependencies:** `helmet`, `express-rate-limit`, `zod`, `axios` (to call FastAPI)
 
-- `POST /api/auth/register` — `{ email, password }` → creates user, returns JWT
-- `POST /api/auth/login` — `{ email, password }` → verifies, returns JWT
+### 5.1 Predict Route (updated)
 
-JWT payload: `{ userId, email }`. Tokens expire in 7 days. Secret from `JWT_SECRET` env var.
+- `POST /api/predict` — validates input with Zod, calls FastAPI `/predict`, returns `{ price }`
+- Backend returns `{ price }` (fixes the `predictedPrice` mismatch)
 
-### 5.2 Predict Route (`/api/predict`)
+### 5.2 New: Zod validation (replaces manual `validateFeatures.ts`)
 
-- `POST /api/predict` — authenticated — calls FastAPI ML service, saves prediction to DB, returns `{ price }`
-- Request body validated with Zod (replaces current manual validation)
-
-### 5.3 History Route (`/api/history`)
-
-- `GET /api/history` — authenticated — returns user's last 50 predictions, newest first
-- Each record: `{ id, size, cityCode, rooms, balconies, parking, price, createdAt }`
-
-### 5.4 Infrastructure
-
-- `helmet()` on all routes
-- `express-rate-limit`: 100 requests/15min globally, 10 requests/15min on `/api/predict`
-- `GET /health` — unauthenticated — returns `{ status: "ok", db: "ok" }`
-- `ML_SERVICE_URL` env var (default `http://localhost:8000`)
-- `DATABASE_URL` env var (Supabase connection string)
-- `JWT_SECRET` env var
-
-### 5.5 Database Schema (Prisma)
-
-```prisma
-model User {
-  id           String       @id @default(cuid())
-  email        String       @unique
-  passwordHash String
-  createdAt    DateTime     @default(now())
-  predictions  Prediction[]
-}
-
-model Prediction {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  size      Int
-  cityCode  Int
-  rooms     Int
-  balconies Int
-  parking   Int
-  price     Float
-  createdAt DateTime @default(now())
-}
+```typescript
+const PredictSchema = z.object({
+  size:      z.number().min(20).max(500),
+  cityCode:  z.number().int().positive(),
+  rooms:     z.number().min(1).max(15),
+  balconies: z.number().min(0).max(5),
+  parking:   z.number().min(0).max(2),  // was capped at 1 — bug fixed
+  year:      z.number().int().min(1948).max(2026),
+});
 ```
 
-### 5.6 Directory Structure
+### 5.3 New: ML service client
+
+```typescript
+// services/mlService.ts
+// HTTP POST to ML_SERVICE_URL/predict via axios
+// Returns { price: number }
+// Throws typed error if ML service unreachable (→ 503 to client)
+```
+
+### 5.4 Infrastructure additions
+
+- `helmet()` on all routes (security headers)
+- `express-rate-limit`: 100 req/15min globally, 20 req/15min on `/api/predict`
+- `GET /health` — returns `{ status: "ok", ml: "ok"|"unreachable" }`
+- `ML_SERVICE_URL` from env (default `http://localhost:8000`)
+- `PORT` from env (default `3000`)
+
+### 5.5 Directory structure (final)
 
 ```
 backend/src/
   app.ts
-  middleware/
-    auth.ts          # JWT verify middleware
-  auth/
-    routes/authRoute.ts
-    controllers/authController.ts
   predict/
     routes/predictRoute.ts
-    controllers/predictController.ts   # calls FastAPI, saves to DB
-    models/predictModel.ts
-  history/
-    routes/historyRoute.ts
-    controllers/historyController.ts
-  utils/
-    validateFeatures.ts  # replaced by Zod schemas
+    controllers/predictController.ts   # calls mlService, returns { price }
+    schemas/predictSchema.ts           # Zod schema
   services/
-    mlService.ts         # HTTP calls to FastAPI (replaces pythonML.ts)
-  prisma/
-    schema.prisma
+    mlService.ts                       # HTTP client for FastAPI
+  (remove: utils/validateFeatures.ts, services/pythonML.ts)
 ```
 
 ---
 
 ## 6. Frontend
 
-**New dependencies:** `react-router-dom` (already installed), `react-hot-toast` (replaces `alert()`), `@tanstack/react-query` (server state)
+**New dependency:** `react-hot-toast` (replaces `alert()`)
 
 ### 6.1 Routes
 
 ```
-/login      → LoginPage (public)
-/register   → RegisterPage (public)
-/           → PredictForm (protected — redirect to /login if no token)
-/history    → HistoryPage (protected)
+/           → PredictForm (improved)
+/history    → HistoryPage (new)
 ```
 
-React Router v6 with a `ProtectedRoute` wrapper that reads JWT from `localStorage`.
+No protected routes — app is fully public.
 
-### 6.2 Auth Pages
+### 6.2 PredictForm (updated)
 
-- `LoginPage`: email + password fields, submit → call `POST /api/auth/login`, store JWT in localStorage, redirect to `/`
-- `RegisterPage`: same fields + confirm password, call `POST /api/auth/register`
-- Both show inline field errors and toast on server error
-
-### 6.3 PredictForm (improved)
-
-- All existing fields retained (size, city, rooms, balconies, parking)
-- Real-time validation: show error helper text per field (not a global message)
-- Toast on API error (replaces `alert()`)
-- Logout button in header
+- Real-time validation: error helper text per field (not a global "Please fill all required fields")
+- `toast.error()` on API failure (replaces `alert()`)
+- "View History" button/link in header
 - Animated price result retained
+- `VITE_API_URL` env var replaces hardcoded `localhost:3000`
+- On successful prediction: save to localStorage (see 6.4)
 
-### 6.4 HistoryPage
+### 6.3 HistoryPage (new)
 
-- Table of past predictions (size, city name, rooms, price, date)
-- Newest first, paginated 20 per page
+- Reads from localStorage, newest first
+- Shows: city name, rooms, size, price, date
 - "No predictions yet" empty state
-- Click row → repopulate form on `/` (optional nice-to-have)
+- "Clear history" button
+- "Back to predictor" link
 
-### 6.5 Environment
+### 6.4 localStorage schema
 
+```typescript
+const STORAGE_KEY = 'yadata_history';
+// Array of up to 20 items, newest first:
+interface HistoryEntry {
+  id: string;          // crypto.randomUUID()
+  size: number;
+  cityCode: number;
+  cityName: string;
+  rooms: number;
+  balconies: number;
+  parking: number;
+  price: number;
+  createdAt: string;   // ISO timestamp
+}
 ```
-frontend/.env.example:
-  VITE_API_URL=http://localhost:3000
-```
 
-`predictApi.ts` uses `import.meta.env.VITE_API_URL` (no hardcoded localhost).
+When a new prediction comes in: prepend to array, trim to 20, write back to localStorage.
+
+### 6.5 Type fixes
+
+```typescript
+// types/predict.ts
+export interface PredictRequest {
+  size: number;
+  cityCode: number;
+  rooms: number;
+  year: number;
+  parking: number;
+  balconies: number;
+}
+
+export interface PredictResponse {
+  price: number;    // was: broken method signature
+}
+```
 
 ### 6.6 Theme
 
-Apply `theme.ts` to `ThemeProvider` in `main.tsx` (currently unused). Update palette to match teal/orange design already in PredictForm.
+Wire `theme.ts` into `ThemeProvider` in `main.tsx` (currently unused). Update palette to match teal/orange used in PredictForm.
+
+### 6.7 Environment
+
+```
+frontend/.env.example
+  VITE_API_URL=http://localhost:3000
+```
 
 ---
 
@@ -212,13 +215,12 @@ Apply `theme.ts` to `ThemeProvider` in `main.tsx` (currently unused). Update pal
 
 ```
 User submits form
-  → Frontend POST /api/predict (with Authorization: Bearer <jwt>)
-  → Express auth middleware verifies JWT
-  → predictController calls FastAPI POST /predict
-  → FastAPI returns { price }
-  → predictController saves Prediction to Supabase
-  → Returns { price } to frontend
-  → Frontend animates price counter
+  → Frontend POST /api/predict
+  → Express: Zod validation → reject 400 if invalid
+  → Express: mlService.ts POST to FastAPI /predict
+  → FastAPI: predict, return { price }
+  → Express: return { price } to frontend
+  → Frontend: save to localStorage, animate price counter
 ```
 
 ---
@@ -227,40 +229,19 @@ User submits form
 
 | Layer | Error | Response |
 |-------|-------|----------|
-| Frontend | Network error | Toast "Unable to reach server" |
-| Frontend | 401 Unauthorized | Redirect to /login |
+| Frontend | Network error | toast.error("Unable to reach server") |
 | Frontend | 400 Validation | Inline field errors |
-| Backend | ML service down | 503 with "Prediction service unavailable" |
-| Backend | DB error | 500 with generic message (logged) |
+| Frontend | 500/503 | toast.error("Prediction failed. Try again.") |
+| Backend | ML service down | 503 "Prediction service unavailable" |
+| Backend | Validation fail | 400 with Zod error details |
 | ML service | Invalid input | 422 from FastAPI |
 
 ---
 
-## 9. Testing (Minimal, Production-Intent)
+## 9. Out of Scope
 
-- Backend: `jest` + `supertest` for auth routes and predict route
-- ML service: one smoke test confirming `/predict` returns a number
-- Frontend: no automated tests (manual verify via dev server)
-
----
-
-## 10. Environment Variables
-
-| Service | Variable | Purpose |
-|---------|----------|---------|
-| Backend | `DATABASE_URL` | Supabase connection string |
-| Backend | `JWT_SECRET` | Token signing secret (min 32 chars) |
-| Backend | `ML_SERVICE_URL` | FastAPI base URL (default: http://localhost:8000) |
-| Backend | `PORT` | Server port (default: 3000) |
-| Frontend | `VITE_API_URL` | Backend base URL (default: http://localhost:3000) |
-
----
-
-## 11. Out of Scope
-
-- Docker Compose (can add later)
-- OAuth / social login
-- Admin dashboard
-- Real-time price updates
-- Email verification
+- Authentication / user accounts
+- Database (Supabase or otherwise)
+- Docker Compose
 - Model retraining pipeline
+- OAuth / social login
