@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Box, Button, Container, TextField, Typography, Paper,
-  CircularProgress, Autocomplete, ToggleButton, ToggleButtonGroup,
+  Autocomplete, ToggleButton, ToggleButtonGroup,
   Slider, Chip, Divider, Tooltip,
 } from "@mui/material";
 import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
@@ -12,7 +12,7 @@ import BedroomParentIcon from "@mui/icons-material/BedroomParent";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import { motion, useMotionValue, animate } from "framer-motion";
 import toast from "react-hot-toast";
-import { predictPrice } from "../api/predictApi";
+import { predictPrice } from "../utils/priceModel";
 import { addHistoryEntry } from "../utils/history";
 import { CITY_MAP } from "../../utils/cities";
 
@@ -39,21 +39,20 @@ export default function PredictForm() {
   const [parking, setParking] = useState<number>(0);
 
   const [price, setPrice] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+
   const animatedPrice = useMotionValue(0);
 
   const isReady = !!city && !!rooms;
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!isReady) return;
-    setLoading(true);
     setPrice(null);
     animatedPrice.set(0);
 
     const roomNum = rooms === "6+" ? 6 : Number(rooms);
 
     try {
-      const result = await predictPrice({
+      const price = predictPrice({
         cityCode: city!.code,
         rooms: roomNum,
         size,
@@ -68,17 +67,16 @@ export default function PredictForm() {
         rooms: roomNum,
         balconies,
         parking,
-        price: result.price,
+        price,
       });
 
-      animate(animatedPrice, result.price, {
+      animate(animatedPrice, price, {
         duration: 1.5,
         onUpdate: (val) => setPrice(Math.round(val)),
       });
     } catch {
       toast.error("Prediction failed. Please try again.");
     } finally {
-      setLoading(false);
     }
   };
 
@@ -280,7 +278,7 @@ export default function PredictForm() {
             variant="contained"
             size="large"
             onClick={handleSubmit}
-            disabled={!isReady || loading}
+            disabled={!isReady}
             sx={{
               py: 1.8,
               fontSize: 17,
@@ -292,7 +290,7 @@ export default function PredictForm() {
               transition: "all 0.25s ease",
             }}
           >
-            {loading ? <CircularProgress size={24} color="inherit" /> : "Get Price Estimate"}
+            Get Price Estimate
           </Button>
 
           {!isReady && (
