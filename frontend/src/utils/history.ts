@@ -6,6 +6,8 @@ export interface HistoryEntry {
   rooms: number;
   balconies: number;
   parking: number;
+  floor: number;
+  buildingAge: string;
   price: number;
   createdAt: string;
 }

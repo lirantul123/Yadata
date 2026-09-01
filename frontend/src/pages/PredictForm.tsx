@@ -9,10 +9,12 @@ import BalconyIcon from "@mui/icons-material/Balcony";
 import SquareFootIcon from "@mui/icons-material/SquareFoot";
 import LocationCityIcon from "@mui/icons-material/LocationCity";
 import BedroomParentIcon from "@mui/icons-material/BedroomParent";
+import StairsIcon from "@mui/icons-material/Stairs";
+import ApartmentIcon from "@mui/icons-material/Apartment";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import { motion, useMotionValue, animate } from "framer-motion";
 import toast from "react-hot-toast";
-import { predictPrice } from "../utils/priceModel";
+import { predictPrice, type BuildingAge } from "../utils/priceModel";
 import { addHistoryEntry } from "../utils/history";
 import { CITY_MAP } from "../../utils/cities";
 
@@ -26,6 +28,14 @@ const CITY_NAME_BY_CODE: Record<number, string> = Object.fromEntries(
 
 const ROOM_OPTIONS = ["1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5", "6+"];
 
+const AGE_OPTIONS: { value: BuildingAge; label: string; sub: string }[] = [
+  { value: "new", label: "New", sub: "2015+" },
+  { value: "standard", label: "Standard", sub: "2000–2015" },
+  { value: "old", label: "Old", sub: "Pre-2000" },
+];
+
+const SELECTED_BTN = { background: "#00796b", color: "#fff", "&:hover": { background: "#005a4f" } };
+
 const fmt = (n: number) =>
   n >= 1_000_000
     ? `₪${(n / 1_000_000).toFixed(2)}M`
@@ -37,9 +47,10 @@ export default function PredictForm() {
   const [size, setSize] = useState<number>(80);
   const [balconies, setBalconies] = useState<number>(0);
   const [parking, setParking] = useState<number>(0);
+  const [floor, setFloor] = useState<number>(1);
+  const [buildingAge, setBuildingAge] = useState<BuildingAge>("standard");
 
   const [price, setPrice] = useState<number | null>(null);
-
   const animatedPrice = useMotionValue(0);
 
   const isReady = !!city && !!rooms;
@@ -52,12 +63,14 @@ export default function PredictForm() {
     const roomNum = rooms === "6+" ? 6 : Number(rooms);
 
     try {
-      const price = predictPrice({
+      const result = predictPrice({
         cityCode: city!.code,
         rooms: roomNum,
         size,
         parking,
         balconies,
+        floor,
+        buildingAge,
       });
 
       addHistoryEntry({
@@ -67,21 +80,27 @@ export default function PredictForm() {
         rooms: roomNum,
         balconies,
         parking,
-        price,
+        floor,
+        buildingAge,
+        price: result,
       });
 
-      animate(animatedPrice, price, {
+      animate(animatedPrice, result, {
         duration: 1.5,
         onUpdate: (val) => setPrice(Math.round(val)),
       });
     } catch {
       toast.error("Prediction failed. Please try again.");
-    } finally {
     }
   };
 
   const low = price ? Math.round(price * 0.88) : null;
   const high = price ? Math.round(price * 1.12) : null;
+
+  const toggleSx = {
+    fontWeight: 600,
+    "&.Mui-selected": SELECTED_BTN,
+  };
 
   return (
     <Box
@@ -96,7 +115,6 @@ export default function PredictForm() {
       }}
     >
       <Container maxWidth="sm">
-        {/* Hero text */}
         <Box textAlign="center" mb={3}>
           <Typography variant="h4" fontWeight={800} sx={{ color: "#004d40", lineHeight: 1.2 }}>
             How much is your property worth?
@@ -119,9 +137,7 @@ export default function PredictForm() {
           <Box mb={3}>
             <Box display="flex" alignItems="center" gap={1} mb={1}>
               <LocationCityIcon sx={{ fontSize: 18, color: "#00796b" }} />
-              <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
-                CITY
-              </Typography>
+              <Typography variant="subtitle2" fontWeight={700} color="text.secondary">CITY</Typography>
             </Box>
             <Autocomplete
               options={CITIES}
@@ -132,7 +148,6 @@ export default function PredictForm() {
                 <TextField
                   {...params}
                   placeholder="Search city..."
-                  size="medium"
                   sx={{ "& .MuiOutlinedInput-root": { borderRadius: 3 } }}
                 />
               )}
@@ -146,9 +161,7 @@ export default function PredictForm() {
           <Box mb={3}>
             <Box display="flex" alignItems="center" gap={1} mb={1.5}>
               <BedroomParentIcon sx={{ fontSize: 18, color: "#00796b" }} />
-              <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
-                ROOMS
-              </Typography>
+              <Typography variant="subtitle2" fontWeight={700} color="text.secondary">ROOMS</Typography>
             </Box>
             <ToggleButtonGroup
               value={rooms}
@@ -158,18 +171,12 @@ export default function PredictForm() {
             >
               {ROOM_OPTIONS.map((r) => (
                 <ToggleButton
-                  key={r}
-                  value={r}
+                  key={r} value={r}
                   sx={{
                     borderRadius: "10px !important",
                     border: "1px solid rgba(0,0,0,0.12) !important",
-                    fontWeight: 600,
-                    minWidth: 52,
-                    "&.Mui-selected": {
-                      background: "#00796b",
-                      color: "#fff",
-                      "&:hover": { background: "#005a4f" },
-                    },
+                    fontWeight: 600, minWidth: 52,
+                    "&.Mui-selected": SELECTED_BTN,
                   }}
                 >
                   {r}
@@ -185,21 +192,12 @@ export default function PredictForm() {
             <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
               <Box display="flex" alignItems="center" gap={1}>
                 <SquareFootIcon sx={{ fontSize: 18, color: "#00796b" }} />
-                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
-                  SIZE
-                </Typography>
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">SIZE</Typography>
               </Box>
-              <Chip
-                label={`${size} m²`}
-                size="small"
-                sx={{ fontWeight: 700, background: "#e8f5f3", color: "#00796b" }}
-              />
+              <Chip label={`${size} m²`} size="small" sx={{ fontWeight: 700, background: "#e8f5f3", color: "#00796b" }} />
             </Box>
             <Slider
-              value={size}
-              min={20}
-              max={400}
-              step={5}
+              value={size} min={20} max={400} step={5}
               onChange={(_, v) => setSize(v as number)}
               sx={{
                 color: "#00796b",
@@ -216,74 +214,88 @@ export default function PredictForm() {
 
           <Divider sx={{ my: 3 }} />
 
+          {/* Floor */}
+          <Box mb={3}>
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <StairsIcon sx={{ fontSize: 18, color: "#00796b" }} />
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">FLOOR</Typography>
+              </Box>
+              <Chip
+                label={floor === 1 ? "Ground" : `Floor ${floor}`}
+                size="small"
+                sx={{ fontWeight: 700, background: "#e8f5f3", color: "#00796b" }}
+              />
+            </Box>
+            <Slider
+              value={floor} min={1} max={20} step={1}
+              onChange={(_, v) => setFloor(v as number)}
+              sx={{
+                color: "#00796b",
+                "& .MuiSlider-thumb": { width: 20, height: 20 },
+                "& .MuiSlider-track": { height: 6 },
+                "& .MuiSlider-rail": { height: 6 },
+              }}
+            />
+            <Box display="flex" justifyContent="space-between">
+              <Typography variant="caption" color="text.secondary">Ground</Typography>
+              <Typography variant="caption" color="text.secondary">20+</Typography>
+            </Box>
+          </Box>
+
+          <Divider sx={{ my: 3 }} />
+
+          {/* Building Age */}
+          <Box mb={3}>
+            <Box display="flex" alignItems="center" gap={1} mb={1.5}>
+              <ApartmentIcon sx={{ fontSize: 18, color: "#00796b" }} />
+              <Typography variant="subtitle2" fontWeight={700} color="text.secondary">BUILDING AGE</Typography>
+            </Box>
+            <ToggleButtonGroup value={buildingAge} exclusive onChange={(_, v) => v && setBuildingAge(v)} fullWidth>
+              {AGE_OPTIONS.map(({ value, label, sub }) => (
+                <ToggleButton key={value} value={value} sx={toggleSx}>
+                  <Box textAlign="center">
+                    <Typography variant="body2" fontWeight={700}>{label}</Typography>
+                    <Typography variant="caption" sx={{ opacity: 0.75 }}>{sub}</Typography>
+                  </Box>
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          </Box>
+
+          <Divider sx={{ my: 3 }} />
+
           {/* Parking + Balconies */}
           <Box display="grid" gridTemplateColumns="1fr 1fr" gap={3} mb={4}>
             <Box>
               <Box display="flex" alignItems="center" gap={1} mb={1.5}>
                 <DirectionsCarIcon sx={{ fontSize: 18, color: "#00796b" }} />
-                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
-                  PARKING
-                </Typography>
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">PARKING</Typography>
               </Box>
-              <ToggleButtonGroup
-                value={parking}
-                exclusive
-                onChange={(_, v) => v !== null && setParking(v)}
-              >
+              <ToggleButtonGroup value={parking} exclusive onChange={(_, v) => v !== null && setParking(v)}>
                 {[0, 1, 2].map((n) => (
-                  <ToggleButton
-                    key={n}
-                    value={n}
-                    sx={{
-                      fontWeight: 600,
-                      "&.Mui-selected": { background: "#00796b", color: "#fff", "&:hover": { background: "#005a4f" } },
-                    }}
-                  >
-                    {n}
-                  </ToggleButton>
+                  <ToggleButton key={n} value={n} sx={toggleSx}>{n}</ToggleButton>
                 ))}
               </ToggleButtonGroup>
             </Box>
             <Box>
               <Box display="flex" alignItems="center" gap={1} mb={1.5}>
                 <BalconyIcon sx={{ fontSize: 18, color: "#00796b" }} />
-                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
-                  BALCONIES
-                </Typography>
+                <Typography variant="subtitle2" fontWeight={700} color="text.secondary">BALCONIES</Typography>
               </Box>
-              <ToggleButtonGroup
-                value={balconies}
-                exclusive
-                onChange={(_, v) => v !== null && setBalconies(v)}
-              >
+              <ToggleButtonGroup value={balconies} exclusive onChange={(_, v) => v !== null && setBalconies(v)}>
                 {[0, 1, 2, 3].map((n) => (
-                  <ToggleButton
-                    key={n}
-                    value={n}
-                    sx={{
-                      fontWeight: 600,
-                      "&.Mui-selected": { background: "#00796b", color: "#fff", "&:hover": { background: "#005a4f" } },
-                    }}
-                  >
-                    {n}
-                  </ToggleButton>
+                  <ToggleButton key={n} value={n} sx={toggleSx}>{n}</ToggleButton>
                 ))}
               </ToggleButtonGroup>
             </Box>
           </Box>
 
-          {/* Submit */}
           <Button
-            fullWidth
-            variant="contained"
-            size="large"
-            onClick={handleSubmit}
-            disabled={!isReady}
+            fullWidth variant="contained" size="large"
+            onClick={handleSubmit} disabled={!isReady}
             sx={{
-              py: 1.8,
-              fontSize: 17,
-              fontWeight: 700,
-              borderRadius: 3,
+              py: 1.8, fontSize: 17, fontWeight: 700, borderRadius: 3,
               background: isReady ? "linear-gradient(135deg,#26a69a,#00796b)" : undefined,
               boxShadow: isReady ? "0 8px 24px rgba(0,121,107,0.35)" : "none",
               "&:hover": { background: "linear-gradient(135deg,#00897b,#004d40)", transform: "translateY(-1px)", boxShadow: "0 12px 28px rgba(0,121,107,0.4)" },
@@ -302,17 +314,11 @@ export default function PredictForm() {
 
         {/* Result */}
         {price !== null && low !== null && high !== null && (
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
+          <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <Paper
               elevation={0}
               sx={{
-                mt: 3,
-                p: { xs: 3, sm: 4 },
-                borderRadius: 5,
+                mt: 3, p: { xs: 3, sm: 4 }, borderRadius: 5,
                 background: "linear-gradient(135deg,#00796b,#004d40)",
                 boxShadow: "0 20px 50px rgba(0,121,107,0.3)",
                 textAlign: "center",
@@ -321,17 +327,14 @@ export default function PredictForm() {
               <Typography variant="overline" sx={{ color: "rgba(255,255,255,0.7)", letterSpacing: 2 }}>
                 Estimated Market Value
               </Typography>
-              <Typography
-                variant="h2"
-                sx={{ color: "#fff", fontWeight: 800, my: 1, fontFeatureSettings: '"tnum"' }}
-              >
+              <Typography variant="h2" sx={{ color: "#fff", fontWeight: 800, my: 1, fontFeatureSettings: '"tnum"' }}>
                 {fmt(price)}
               </Typography>
               <Box display="flex" justifyContent="center" alignItems="center" gap={1} mb={2}>
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.75)" }}>
                   Range: {fmt(low)} – {fmt(high)}
                 </Typography>
-                <Tooltip title="Estimated ±12% confidence interval based on market variation">
+                <Tooltip title="±12% confidence interval based on market variation">
                   <InfoOutlinedIcon sx={{ fontSize: 14, color: "rgba(255,255,255,0.5)", cursor: "help" }} />
                 </Tooltip>
               </Box>
@@ -339,6 +342,8 @@ export default function PredictForm() {
                 {city && <Chip label={city.name} size="small" sx={{ background: "rgba(255,255,255,0.15)", color: "#fff" }} />}
                 <Chip label={`${rooms} rooms`} size="small" sx={{ background: "rgba(255,255,255,0.15)", color: "#fff" }} />
                 <Chip label={`${size} m²`} size="small" sx={{ background: "rgba(255,255,255,0.15)", color: "#fff" }} />
+                <Chip label={`Floor ${floor}`} size="small" sx={{ background: "rgba(255,255,255,0.15)", color: "#fff" }} />
+                <Chip label={buildingAge} size="small" sx={{ background: "rgba(255,255,255,0.15)", color: "#fff" }} />
               </Box>
             </Paper>
           </motion.div>
