@@ -10,32 +10,27 @@ Live: **[yadata.vercel.app](https://yadata.vercel.app)**
 
 ### Data Source
 
-The model is built on **Israel CBS housing price survey data** (2017–2025), which publishes average transaction prices by city and room category (3-room and 4+-room apartments). This is the most complete freely available aggregate dataset for Israeli residential real estate.
+The model is built on **nadlan.gov.il** — the Israeli Tax Authority's official real estate transaction portal. City-level price profiles are fetched directly from `data.nadlan.gov.il/api/additional_info/settlements/{cityCode}.json`, which exposes current market statistics derived from registered apartment sale transactions.
 
-The raw data lives in `api/real_estate.csv` (Windows-1255 Hebrew encoding, ~35 cities, ~231 rows).
+Fields used: `buy3Rooms`, `buy4Rooms`, `buy5Rooms` (average transaction price per room category), and `SquareMeter` (city average price per m²). This is real Tax Authority data, not survey estimates.
 
 ### Training: City Price Profiles
 
-At build time, `api/real_estate.csv` is preprocessed into `frontend/src/data/cityProfiles.json`. For each city the script computes two **exponentially time-weighted** price-per-m² anchors:
+At build time, a fetch script pulls `data.nadlan.gov.il/api/additional_info/settlements/{code}.json` for all 35 supported cities and writes `frontend/src/data/cityProfiles.json`. Each city entry contains three price-per-m² anchors:
 
-| Anchor | Room category | Assumed avg size | Weight |
-|--------|--------------|-----------------|--------|
-| `ppsm3` | 3-room unit | 75 m² | 2025 row weighs ~8× more than 2017 row |
-| `ppsm4` | 4+-room unit | 100 m² | same decay (λ = 0.35/year) |
-
-Recency weighting formula: `w = e^(0.35 × (year − 2017))`
-
-This means 2025 data contributes ~8× more than 2017 data, keeping predictions anchored to current market prices.
+| Anchor | Room category | Standard size | Formula |
+|--------|--------------|--------------|---------|
+| `ppsm3` | 3-room | 75 m² | `buy3Rooms / 75` |
+| `ppsm4` | 4-room | 95 m² | `buy4Rooms / 95` |
+| `ppsm5` | 5-room | 120 m² | `buy5Rooms / 120` |
 
 ### Inference: How a Price is Computed
 
 Given user inputs (city, rooms, size, floor, building age, parking, balconies):
 
-1. **City price-per-m²** — linearly interpolate between `ppsm3` and `ppsm4` at the requested room count. Cities not in the dataset fall back to the national median.
+1. **City price-per-m²** — interpolate between the three room anchors (ppsm3/ppsm4/ppsm5) at the requested room count. For rooms outside the 3–5 range, extrapolation is dampened (0.6× slope below 3, 0.5× above 5). Cities not in the dataset fall back to the national median.
 
-2. **Small apartment correction** — Israeli studios and 1–2 room units command a higher price-per-m² than the 3-room baseline (investor demand). A correction factor is applied: 1-room × 1.18, 2-room × 1.04.
-
-3. **Base price** = `size × adjusted_ppsm`
+2. **Base price** = `size × ppsm`
 
 4. **Floor premium** — each floor above ground adds ~1.4%, capped at 20% for high floors. Ground floor = 0 premium.
 
@@ -91,48 +86,36 @@ api/
 
 ## Regenerating City Profiles
 
-If the CSV is updated, regenerate the JSON:
+Fetches live data from the nadlan.gov.il Tax Authority API (no authentication required):
 
 ```bash
 python3 -c "
-import csv, json, math
+import urllib.request, json, time
 
-SQM_3, SQM_4 = 75.0, 100.0
-DECAY, BASE = 0.35, 2017
-C3 = 'average price (NIS) 3 rooms apartments'
-C4 = 'average price (NIS) 4+ rooms apartments'
-buckets = {}
+BASE = 'https://data.nadlan.gov.il/api'
+CITIES = [70,2600,2610,2630,2640,2660,3000,3780,3797,4000,5000,
+          6100,6200,6300,6400,6500,6600,6800,6900,7000,7100,7200,
+          7300,7400,7600,7700,7900,8300,8400,8500,8600,8700,9000,9100,9700]
+SQM = {3:75.0, 4:95.0, 5:120.0}
+profiles, all_ppsm = {}, []
 
-with open('api/real_estate.csv', encoding='windows-1255') as f:
-    for row in csv.DictReader(f):
-        code, year = int(row['Lamas_code']), int(row['year'])
-        w = math.exp(DECAY * (year - BASE))
-        b = buckets.setdefault(code, {'3': [], '4': []})
-        try:
-            v = float(row[C3])
-            if v > 0: b['3'].append([w, v / SQM_3])
-        except: pass
-        try:
-            v = float(row[C4])
-            if v > 0: b['4'].append([w, v / SQM_4])
-        except: pass
+for code in CITIES:
+    req = urllib.request.Request(f'{BASE}/additional_info/settlements/{code}.json')
+    req.add_header('User-Agent', 'Mozilla/5.0')
+    with urllib.request.urlopen(req, timeout=20) as r:
+        rei = json.loads(r.read()).get('RealEstateIndices', {})
+    b3,b4,b5 = rei.get('buy3Rooms'),rei.get('buy4Rooms'),rei.get('buy5Rooms')
+    if b3 and b4 and b5:
+        p3,p4,p5 = b3/SQM[3], b4/SQM[4], b5/SQM[5]
+        profiles[str(code)] = [round(p3,2), round(p4,2), round(p5,2)]
+        all_ppsm.extend([p3,p4,p5])
+    time.sleep(0.25)
 
-def wavg(pairs):
-    ws = sum(w for w,_ in pairs)
-    return sum(w*v for w,v in pairs) / ws if pairs else None
-
-profiles = {}
-for code, b in buckets.items():
-    p3, p4 = wavg(b['3']), wavg(b['4'])
-    if not p3 and not p4: continue
-    p3 = p3 or p4 * (SQM_4/SQM_3) * 0.90
-    p4 = p4 or p3 * (SQM_3/SQM_4) * 1.08
-    profiles[str(code)] = [round(p3, 2), round(p4, 2)]
-
-vals = sorted(v for p3,p4 in profiles.values() for v in (p3,p4))
-national = vals[len(vals)//2]
-with open('frontend/src/data/cityProfiles.json', 'w') as f:
-    json.dump({'profiles': profiles, 'nationalPpsm': round(national, 2)}, f, indent=2)
-print(f'Done: {len(profiles)} cities')
+all_ppsm.sort()
+national = all_ppsm[len(all_ppsm)//2]
+with open('frontend/src/data/cityProfiles.json','w') as f:
+    json.dump({'profiles':profiles,'nationalPpsm':round(national,2),
+               'source':'nadlan.gov.il Tax Authority'}, f, indent=2)
+print(f'{len(profiles)} cities written, national median ₪{national:,.0f}/m2')
 "
 ```

@@ -1,32 +1,44 @@
 import data from "../data/cityProfiles.json";
 
+// Data source: nadlan.gov.il Tax Authority transaction prices (2024-2025)
+// profiles[cityCode] = [ppsm3, ppsm4, ppsm5]
+//   ppsm3 = buy3Rooms / 75m²  (3-room standard size)
+//   ppsm4 = buy4Rooms / 95m²  (4-room standard size)
+//   ppsm5 = buy5Rooms / 120m² (5-room standard size)
+
 const PARKING_BONUS = 55_000;
 const BALCONY_BONUS = 28_000;
 
-// Floor premium: ~1.4% per floor above ground, diminishing above floor 10
-// Based on Israeli market transaction analysis (Nadlan/CBS cross-reference)
 const FLOOR_PREMIUM_PER_FLOOR = 0.014;
-const FLOOR_PREMIUM_CAP = 0.20; // max 20% for very high floors
+const FLOOR_PREMIUM_CAP = 0.20;
 
-// Building age multipliers (relative to standard 2000-2015 stock)
 export type BuildingAge = "new" | "standard" | "old";
 const AGE_MULTIPLIER: Record<BuildingAge, number> = {
-  new: 1.09,       // post-2015: new construction premium
-  standard: 1.00,  // 2000-2015: baseline
-  old: 0.93,       // pre-2000: older stock discount (unless renovated area)
+  new: 1.09,
+  standard: 1.00,
+  old: 0.93,
 };
 
-// Small apartment correction: in Israeli cities, studios/1-room command
-// a higher price-per-sqm than the 3-room baseline suggests (investor demand)
-const SMALL_APT_PPSM_BOOST: Record<number, number> = {
-  1: 1.18,
-  1.5: 1.10,
-  2: 1.04,
-  2.5: 1.01,
-};
-
-const profiles = data.profiles as unknown as Record<string, [number, number]>;
+const profiles = data.profiles as unknown as Record<string, [number, number, number]>;
 const nationalPpsm = data.nationalPpsm;
+
+function interpolatePpsm(pair: [number, number, number], rooms: number): number {
+  const [p3, p4, p5] = pair;
+
+  if (rooms <= 3) {
+    // Extrapolate below 3 rooms: smaller units typically have higher ppsm
+    const slope = p3 - p4; // positive = p3 > p4 means smaller = pricier per m²
+    return p3 + slope * (3 - rooms) * 0.6; // dampened extrapolation
+  } else if (rooms <= 4) {
+    return p3 + (p4 - p3) * (rooms - 3);
+  } else if (rooms <= 5) {
+    return p4 + (p5 - p4) * (rooms - 4);
+  } else {
+    // Extrapolate above 5 rooms: diminishing price per m²
+    const slope = p5 - p4;
+    return p5 + slope * (rooms - 5) * 0.5;
+  }
+}
 
 export function predictPrice(params: {
   cityCode: number;
@@ -40,29 +52,17 @@ export function predictPrice(params: {
   const { cityCode, rooms, size, parking, balconies, floor, buildingAge } = params;
 
   const pair = profiles[String(cityCode)];
-  const ppsm3 = pair ? pair[0] : nationalPpsm;
-  const ppsm4 = pair ? pair[1] : nationalPpsm;
-
-  // Linear interpolation between 3-room and 4+-room anchors
-  const slope = ppsm4 - ppsm3;
-  let ppsm = ppsm3 + slope * (rooms - 3);
-  const mid = (ppsm3 + ppsm4) / 2;
-  ppsm = Math.max(mid * 0.7, Math.min(mid * 1.5, ppsm));
-
-  // Small apartment boost (higher ppsm for studios/1-2 room units)
-  const smallBoost = SMALL_APT_PPSM_BOOST[rooms] ?? 1.0;
-  ppsm *= smallBoost;
+  const ppsm = pair
+    ? interpolatePpsm(pair, rooms)
+    : nationalPpsm;
 
   let price = size * ppsm;
 
-  // Floor premium (ground floor = 0 bonus, each floor above adds ~1.4%)
   const floorPremium = Math.min((floor - 1) * FLOOR_PREMIUM_PER_FLOOR, FLOOR_PREMIUM_CAP);
   price *= 1 + floorPremium;
 
-  // Building age multiplier
   price *= AGE_MULTIPLIER[buildingAge];
 
-  // Absolute amenity bonuses
   price += parking * PARKING_BONUS + balconies * BALCONY_BONUS;
 
   return Math.max(price, 100_000);
