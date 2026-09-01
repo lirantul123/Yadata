@@ -2,10 +2,7 @@
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
   "functions": {
-    "api/predict.py": {
-      "runtime": "python3.12",
-      "maxDuration": 30
-    }
+    "api/predict.py": { "maxDuration": 30 }
   },
   "routes": [
     { "handle": "filesystem" },
