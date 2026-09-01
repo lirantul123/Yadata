@@ -1,85 +1,84 @@
 from http.server import BaseHTTPRequestHandler
+import csv
 import json
 import math
 import os
-import numpy as np
-import pandas as pd
 
-# Israeli market: assumed average sqm per room category
-_SQM_3 = 75.0   # 3-room unit ≈ 75 m²
-_SQM_4 = 100.0  # 4+-room unit ≈ 100 m²
-
-# Absolute bonuses per amenity (NIS), market-calibrated
+_SQM_3 = 75.0
+_SQM_4 = 100.0
 _PARKING_BONUS = 55_000
 _BALCONY_BONUS = 28_000
+_BASE_YEAR = 2017
+_DECAY = 0.35
 
 _CSV = os.path.join(os.path.dirname(__file__), "real_estate.csv")
 
-# Base year for exponential time-weighting
-_BASE_YEAR = 2017
-_DECAY = 0.35  # higher = stronger recency preference
+
+def _load_profiles():
+    C3 = "average price (NIS) 3 rooms apartments"
+    C4 = "average price (NIS) 4+ rooms apartments"
+    buckets = {}  # code -> {3: [(w, ppsm)], 4: [(w, ppsm)]}
+
+    with open(_CSV, encoding="windows-1255", newline="") as f:
+        for row in csv.DictReader(f):
+            code = int(row["Lamas_code"])
+            try:
+                year = int(row["year"])
+            except (ValueError, KeyError):
+                continue
+            w = math.exp(_DECAY * (year - _BASE_YEAR))
+            b = buckets.setdefault(code, {3: [], 4: []})
+            try:
+                v = float(row[C3])
+                if v > 0:
+                    b[3].append((w, v / _SQM_3))
+            except (ValueError, KeyError):
+                pass
+            try:
+                v = float(row[C4])
+                if v > 0:
+                    b[4].append((w, v / _SQM_4))
+            except (ValueError, KeyError):
+                pass
+
+    def wavg(pairs):
+        if not pairs:
+            return None
+        ws = sum(w for w, _ in pairs)
+        return sum(w * v for w, v in pairs) / ws
+
+    profiles = {}
+    for code, b in buckets.items():
+        p3 = wavg(b[3])
+        p4 = wavg(b[4])
+        if p3 is None and p4 is None:
+            continue
+        if p3 is None:
+            p3 = p4 * (_SQM_4 / _SQM_3) * 0.90
+        if p4 is None:
+            p4 = p3 * (_SQM_3 / _SQM_4) * 1.08
+        profiles[code] = (p3, p4)
+
+    all_vals = [v for p3, p4 in profiles.values() for v in (p3, p4)]
+    all_vals.sort()
+    national = all_vals[len(all_vals) // 2] if all_vals else 18_000.0
+    return profiles, national
 
 
-class _Model:
-    def __init__(self):
-        df = pd.read_csv(_CSV, encoding="windows-1255")
-        C3 = "average price (NIS) 3 rooms apartments"
-        C4 = "average price (NIS) 4+ rooms apartments"
-
-        # Per city: compute exponentially time-weighted price-per-sqm
-        # for 3-room and 4+-room units separately
-        profiles = {}
-        for code, grp in df.groupby("Lamas_code"):
-            w3_sum = w3_val = w4_sum = w4_val = 0.0
-            for _, row in grp.iterrows():
-                w = math.exp(_DECAY * (row["year"] - _BASE_YEAR))
-                if pd.notna(row[C3]) and row[C3] > 0:
-                    ppsm = row[C3] / _SQM_3
-                    w3_val += w * ppsm
-                    w3_sum += w
-                if pd.notna(row[C4]) and row[C4] > 0:
-                    ppsm = row[C4] / _SQM_4
-                    w4_val += w * ppsm
-                    w4_sum += w
-            ppsm3 = w3_val / w3_sum if w3_sum > 0 else None
-            ppsm4 = w4_val / w4_sum if w4_sum > 0 else None
-            if ppsm3 is not None or ppsm4 is not None:
-                profiles[int(code)] = (ppsm3, ppsm4)
-
-        # Fill cities that only have one of the two data points
-        for code, (p3, p4) in profiles.items():
-            if p3 is None:
-                profiles[code] = (p4 * (_SQM_4 / _SQM_3) * 0.90, p4)
-            elif p4 is None:
-                profiles[code] = (p3, p3 * (_SQM_3 / _SQM_4) * 1.08)
-
-        self._profiles = profiles
-
-        # National fallback: median price-per-sqm across all cities
-        all_ppsm = [p for p3, p4 in profiles.values() for p in (p3, p4) if p]
-        self._national_ppsm = float(np.median(all_ppsm)) if all_ppsm else 18_000.0
-
-    def predict(self, city_code: int, rooms: float, size: float, parking: int, balconies: int) -> float:
-        pair = self._profiles.get(city_code)
-        if pair:
-            ppsm3, ppsm4 = pair
-        else:
-            ppsm3 = ppsm4 = self._national_ppsm
-
-        # Linear interpolation/extrapolation between 3-room and 4-room anchor
-        # rooms=3 → ppsm3, rooms=4 → ppsm4
-        slope = (ppsm4 - ppsm3) / 1.0  # per room above 3
-        ppsm = ppsm3 + slope * (rooms - 3.0)
-
-        # Clamp: never go below 70% or above 150% of city midpoint
-        mid = (ppsm3 + ppsm4) / 2
-        ppsm = max(mid * 0.70, min(mid * 1.50, ppsm))
-
-        price = size * ppsm + parking * _PARKING_BONUS + balconies * _BALCONY_BONUS
-        return max(price, 100_000.0)
+_profiles, _national_ppsm = _load_profiles()
 
 
-_model = _Model()
+def _predict(city_code, rooms, size, parking, balconies):
+    pair = _profiles.get(city_code)
+    if pair:
+        ppsm3, ppsm4 = pair
+    else:
+        ppsm3 = ppsm4 = _national_ppsm
+    slope = ppsm4 - ppsm3
+    ppsm = ppsm3 + slope * (rooms - 3.0)
+    mid = (ppsm3 + ppsm4) / 2
+    ppsm = max(mid * 0.70, min(mid * 1.50, ppsm))
+    return max(size * ppsm + parking * _PARKING_BONUS + balconies * _BALCONY_BONUS, 100_000.0)
 
 
 class handler(BaseHTTPRequestHandler):
@@ -112,7 +111,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            price = _model.predict(int(city_code), float(rooms), float(size), parking, balconies)
+            price = _predict(int(city_code), float(rooms), float(size), parking, balconies)
             self._respond(200, {"price": round(price, 2)})
         except Exception as e:
             self._respond(500, {"error": str(e)})
