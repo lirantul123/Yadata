@@ -1,82 +1,82 @@
 from http.server import BaseHTTPRequestHandler
 import json
+import math
 import os
 import numpy as np
 import pandas as pd
 
-CITY_MULTIPLIER = {
-    5000: 1.00,  # Tel Aviv
-    6400: 0.92,  # Herzliya
-    8700: 0.90,  # Ra'anana
-    6300: 0.88,  # Givatayim
-    8600: 0.85,  # Ramat Gan
-    7200: 0.82,  # Nes Ziona
-    3000: 0.80,  # Jerusalem
-    6900: 0.80,  # Kfar Saba
-    8400: 0.80,  # Rehovot
-    8300: 0.78,  # Rishon LeZion
-    6100: 0.78,  # Bnei Brak
-    7900: 0.77,  # Petah Tikva
-    6600: 0.76,  # Holon
-    4000: 0.75,  # Haifa
-    9700: 0.75,  # Hod HaSharon
-    6200: 0.72,  # Bat Yam
-    7400: 0.72,  # Netanya
-    2640: 0.68,  # Rosh HaAyin
-    2660: 0.65,  # Yavne
-    6500: 0.65,  # Hadera
-    2600: 0.62,  # Eilat
-    7100: 0.62,  # Ashkelon
-    6800: 0.60,  # Kiryat Ata
-    70:   0.60,  # Ashdod
-    9100: 0.58,  # Nahariya
-    7600: 0.55,  # Akko
-    2610: 0.55,  # Beit Shemesh
-    7700: 0.52,  # Afula
-    7300: 0.50,  # Nazareth
-    9000: 0.50,  # Beersheba
-    8500: 0.48,  # Ramla
-    7000: 0.48,  # Lod
-    2630: 0.42,  # Kiryat Gat
-    3780: 0.45,  # Beitar Illit
-    3797: 0.45,  # Modiin Illit
-}
+# Israeli market: assumed average sqm per room category
+_SQM_3 = 75.0   # 3-room unit ≈ 75 m²
+_SQM_4 = 100.0  # 4+-room unit ≈ 100 m²
+
+# Absolute bonuses per amenity (NIS), market-calibrated
+_PARKING_BONUS = 55_000
+_BALCONY_BONUS = 28_000
 
 _CSV = os.path.join(os.path.dirname(__file__), "real_estate.csv")
+
+# Base year for exponential time-weighting
+_BASE_YEAR = 2017
+_DECAY = 0.35  # higher = stronger recency preference
 
 
 class _Model:
     def __init__(self):
         df = pd.read_csv(_CSV, encoding="windows-1255")
-        p3, p4 = {}, {}
-        for _, row in df.iterrows():
-            code = int(row["Lamas_code"])
-            c3 = "average price (NIS) 3 rooms apartments"
-            c4 = "average price (NIS) 4+ rooms apartments"
-            if pd.notna(row[c3]):
-                p3.setdefault(code, []).append(float(row[c3]))
-            if pd.notna(row[c4]):
-                p4.setdefault(code, []).append(float(row[c4]))
-        self._a3 = {c: float(np.mean(v)) for c, v in p3.items()}
-        self._a4 = {c: float(np.mean(v)) for c, v in p4.items()}
-        all3 = [v for vs in p3.values() for v in vs]
-        all4 = [v for vs in p4.values() for v in vs]
-        self._g3 = float(np.mean(all3))
-        self._g4 = float(np.mean(all4))
-        self._gm = float(np.mean(list(CITY_MULTIPLIER.values())))
+        C3 = "average price (NIS) 3 rooms apartments"
+        C4 = "average price (NIS) 4+ rooms apartments"
 
-    def predict(self, city_code, rooms, size, parking, balconies):
-        small = rooms <= 3.5
-        if small:
-            base = self._a3.get(city_code) or self._g3 * CITY_MULTIPLIER.get(city_code, self._gm)
-            ref = 75.0
+        # Per city: compute exponentially time-weighted price-per-sqm
+        # for 3-room and 4+-room units separately
+        profiles = {}
+        for code, grp in df.groupby("Lamas_code"):
+            w3_sum = w3_val = w4_sum = w4_val = 0.0
+            for _, row in grp.iterrows():
+                w = math.exp(_DECAY * (row["year"] - _BASE_YEAR))
+                if pd.notna(row[C3]) and row[C3] > 0:
+                    ppsm = row[C3] / _SQM_3
+                    w3_val += w * ppsm
+                    w3_sum += w
+                if pd.notna(row[C4]) and row[C4] > 0:
+                    ppsm = row[C4] / _SQM_4
+                    w4_val += w * ppsm
+                    w4_sum += w
+            ppsm3 = w3_val / w3_sum if w3_sum > 0 else None
+            ppsm4 = w4_val / w4_sum if w4_sum > 0 else None
+            if ppsm3 is not None or ppsm4 is not None:
+                profiles[int(code)] = (ppsm3, ppsm4)
+
+        # Fill cities that only have one of the two data points
+        for code, (p3, p4) in profiles.items():
+            if p3 is None:
+                profiles[code] = (p4 * (_SQM_4 / _SQM_3) * 0.90, p4)
+            elif p4 is None:
+                profiles[code] = (p3, p3 * (_SQM_3 / _SQM_4) * 1.08)
+
+        self._profiles = profiles
+
+        # National fallback: median price-per-sqm across all cities
+        all_ppsm = [p for p3, p4 in profiles.values() for p in (p3, p4) if p]
+        self._national_ppsm = float(np.median(all_ppsm)) if all_ppsm else 18_000.0
+
+    def predict(self, city_code: int, rooms: float, size: float, parking: int, balconies: int) -> float:
+        pair = self._profiles.get(city_code)
+        if pair:
+            ppsm3, ppsm4 = pair
         else:
-            base = self._a4.get(city_code) or self._g4 * CITY_MULTIPLIER.get(city_code, self._gm)
-            ref = 110.0
-        size_f = (size / ref) ** 0.75
-        room_f = 1.0 + (rooms - (3.0 if small else 4.0)) * 0.12
-        extras = 1.0 + parking * 0.07 + balconies * 0.04
-        return max(base * size_f * room_f * extras, 150_000.0)
+            ppsm3 = ppsm4 = self._national_ppsm
+
+        # Linear interpolation/extrapolation between 3-room and 4-room anchor
+        # rooms=3 → ppsm3, rooms=4 → ppsm4
+        slope = (ppsm4 - ppsm3) / 1.0  # per room above 3
+        ppsm = ppsm3 + slope * (rooms - 3.0)
+
+        # Clamp: never go below 70% or above 150% of city midpoint
+        mid = (ppsm3 + ppsm4) / 2
+        ppsm = max(mid * 0.70, min(mid * 1.50, ppsm))
+
+        price = size * ppsm + parking * _PARKING_BONUS + balconies * _BALCONY_BONUS
+        return max(price, 100_000.0)
 
 
 _model = _Model()
